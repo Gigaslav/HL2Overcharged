@@ -1,0 +1,27 @@
+Microsoft Visual Studio Solution File, Format Version 7.00
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TestApp", "TestApp\TestApp.csproj", "{3BE55991-650C-41C2-89A0-7F355B6302F4}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SpeechListBox", "Control\SpeechListBox.csproj", "{2E9F6C4C-6327-458F-9489-060AD7C4AB58}"
+EndProject
+Global
+	GlobalSection(SolutionConfiguration) = preSolution
+		ConfigName.0 = Debug
+		ConfigName.1 = Release
+	EndGlobalSection
+	GlobalSection(ProjectDependencies) = postSolution
+	EndGlobalSection
+	GlobalSection(ProjectConfiguration) = postSolution
+		{2E9F6C4C-6327-458F-9489-060AD7C4AB58}.Debug.ActiveCfg = Debug|.NET
+		{2E9F6C4C-6327-458F-9489-060AD7C4AB58}.Debug.Build.0 = Debug|.NET
+		{2E9F6C4C-6327-458F-9489-060AD7C4AB58}.Release.ActiveCfg = Release|.NET
+		{2E9F6C4C-6327-458F-9489-060AD7C4AB58}.Release.Build.0 = Release|.NET
+		{3BE55991-650C-41C2-89A0-7F355B6302F4}.Debug.ActiveCfg = Debug|.NET
+		{3BE55991-650C-41C2-89A0-7F355B6302F4}.Debug.Build.0 = Debug|.NET
+		{3BE55991-650C-41C2-89A0-7F355B6302F4}.Release.ActiveCfg = Release|.NET
+		{3BE55991-650C-41C2-89A0-7F355B6302F4}.Release.Build.0 = Release|.NET
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+	EndGlobalSection
+	GlobalSection(ExtensibilityAddIns) = postSolution
+	EndGlobalSection
+EndGlobal

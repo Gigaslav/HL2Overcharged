@@ -1,0 +1,31 @@
+#include "common_vs_fxc.h"
+
+float2 screenSize;
+float viewAspect;
+float tanHalfFov;
+
+struct VS_INPUT
+{
+    float4 position : POSITION0;
+};
+
+struct VS_OUTPUT
+{
+    float4 position : POSITION0;
+    float2 texCoord : TEXCOORD0;
+    float3 cameraEye : TEXCOORD1;
+};
+
+VS_OUTPUT main( const VS_INPUT v )
+{
+	VS_OUTPUT o = ( VS_OUTPUT )0;
+
+    o.position = v.position;
+    o.texCoord = v.position.xy * float2(0.5, -0.5) + float2(0.5, 0.5) + 0.5 / screenSize;
+    o.cameraEye = float3(v.position.x * tanHalfFov * viewAspect, v.position.y * tanHalfFov, 1);
+
+	return o;
+}
+
+
+

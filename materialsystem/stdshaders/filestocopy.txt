@@ -1,0 +1,5 @@
+C:\SourceCodes\SourceCode2013\src_RTT\dx9sdk\utilities\dx_proxy.dll 
+\shadercompile.exe 
+\shadercompile_dll.dll 
+\vstdlib.dll 
+\tier0.dll 

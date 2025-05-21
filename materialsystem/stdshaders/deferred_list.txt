@@ -1,0 +1,2 @@
+deferred_lightning_ps30.fxc
+deferred_lightning_vs30.fxc

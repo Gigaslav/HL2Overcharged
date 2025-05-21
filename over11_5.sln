@@ -1,0 +1,34 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio 2013
+VisualStudioVersion = 12.0.40629.0
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Client (Episodic)", "game\client\client_episodic.vcxproj", "{353A799F-E73F-7A69-07AD-B2AD57F3B775}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Shaders (Episodic)", "materialsystem\stdshaders\game_shader_dx9_episodic.vcxproj", "{73F37A6E-6BFF-33FB-E47D-67E8212A7C6D}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Server (Episodic)", "game\server\server_episodic.vcxproj", "{7855B476-B6D4-535D-F7A9-D623245F8B07}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Win32 = Debug|Win32
+		Release|Win32 = Release|Win32
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{353A799F-E73F-7A69-07AD-B2AD57F3B775}.Debug|Win32.ActiveCfg = Debug|Win32
+		{353A799F-E73F-7A69-07AD-B2AD57F3B775}.Debug|Win32.Build.0 = Debug|Win32
+		{353A799F-E73F-7A69-07AD-B2AD57F3B775}.Release|Win32.ActiveCfg = Release|Win32
+		{353A799F-E73F-7A69-07AD-B2AD57F3B775}.Release|Win32.Build.0 = Release|Win32
+		{73F37A6E-6BFF-33FB-E47D-67E8212A7C6D}.Debug|Win32.ActiveCfg = Debug|Win32
+		{73F37A6E-6BFF-33FB-E47D-67E8212A7C6D}.Debug|Win32.Build.0 = Debug|Win32
+		{73F37A6E-6BFF-33FB-E47D-67E8212A7C6D}.Release|Win32.ActiveCfg = Release|Win32
+		{73F37A6E-6BFF-33FB-E47D-67E8212A7C6D}.Release|Win32.Build.0 = Release|Win32
+		{7855B476-B6D4-535D-F7A9-D623245F8B07}.Debug|Win32.ActiveCfg = Debug|Win32
+		{7855B476-B6D4-535D-F7A9-D623245F8B07}.Debug|Win32.Build.0 = Debug|Win32
+		{7855B476-B6D4-535D-F7A9-D623245F8B07}.Release|Win32.ActiveCfg = Release|Win32
+		{7855B476-B6D4-535D-F7A9-D623245F8B07}.Release|Win32.Build.0 = Release|Win32
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+EndGlobal

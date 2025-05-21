@@ -1,0 +1,408 @@
+//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//
+// Purpose: Grigori's personal shotgun (npc_monk)
+//
+//=============================================================================//
+
+#include	"cbase.h"
+#include	"npcevent.h"
+#include	"weapon_annabelle.h"
+#include	"basecombatcharacter.h"
+#include	"ai_basenpc.h"
+#include	"player.h"
+#include	"gamerules.h"		// For g_pGameRules
+#include	"in_buttons.h"
+#include	"soundent.h"
+#include	"vstdlib/random.h"
+#include "gamestats.h"
+#include "IEffects.h"
+#include "te_effect_dispatch.h"
+#include "particle_parse.h"
+// memdbgon must be the last include file in a .cpp file!!!
+#include "tier0/memdbgon.h"
+
+extern ConVar sk_auto_reload_time;
+
+
+IMPLEMENT_SERVERCLASS_ST(CWeaponAnnabelle, DT_WeaponAnnabelle)
+END_SEND_TABLE()
+
+LINK_ENTITY_TO_CLASS(weapon_annabelle, CWeaponAnnabelle);
+PRECACHE_WEAPON_REGISTER(weapon_annabelle);
+
+BEGIN_DATADESC(CWeaponAnnabelle)
+DEFINE_FIELD(m_bNeedPump, FIELD_BOOLEAN),
+DEFINE_FIELD(m_bDelayedFire1, FIELD_BOOLEAN),
+DEFINE_FIELD(m_bDelayedFire2, FIELD_BOOLEAN),
+END_DATADESC()
+
+acttable_t	CWeaponAnnabelle::m_acttable[] =
+{
+	{ ACT_IDLE_ANGRY, ACT_IDLE_ANGRY_SMG1, true },
+	{ ACT_RANGE_ATTACK1, ACT_RANGE_ATTACK_SHOTGUN, true },
+	{ ACT_RELOAD, ACT_RELOAD_SMG1, true },
+	{ ACT_WALK, ACT_WALK_RIFLE, true },
+	{ ACT_WALK_AIM, ACT_WALK_AIM_RIFLE, true },
+	{ ACT_WALK_CROUCH, ACT_WALK_CROUCH_RIFLE, false },
+	{ ACT_WALK_CROUCH_AIM, ACT_WALK_CROUCH_AIM_RIFLE, false },
+	{ ACT_RUN, ACT_RUN_RIFLE, true },
+	{ ACT_RUN_AIM, ACT_RUN_AIM_RIFLE, true },
+	{ ACT_RUN_CROUCH, ACT_RUN_CROUCH_RIFLE, false },
+	{ ACT_RUN_CROUCH_AIM, ACT_RUN_CROUCH_AIM_RIFLE, false },
+	{ ACT_GESTURE_RANGE_ATTACK1, ACT_GESTURE_RANGE_ATTACK_SHOTGUN, true },
+	{ ACT_RELOAD_LOW, ACT_RELOAD_SMG1_LOW, false },
+	{ ACT_GESTURE_RELOAD, ACT_GESTURE_RELOAD_SMG1, false },
+
+	{ ACT_HL2MP_IDLE, ACT_HL2MP_IDLE_PHYSGUN, false },
+	{ ACT_HL2MP_RUN, ACT_HL2MP_RUN_PHYSGUN, false },
+	{ ACT_HL2MP_IDLE_CROUCH, ACT_HL2MP_IDLE_CROUCH_PHYSGUN, false },
+	{ ACT_HL2MP_WALK_CROUCH, ACT_HL2MP_WALK_CROUCH_PHYSGUN, false },
+	{ ACT_HL2MP_GESTURE_RANGE_ATTACK, ACT_HL2MP_GESTURE_RANGE_ATTACK_PHYSGUN, false },
+	{ ACT_HL2MP_GESTURE_RELOAD, ACT_HL2MP_GESTURE_RELOAD_PHYSGUN, false },
+	{ ACT_HL2MP_JUMP, ACT_HL2MP_JUMP_PHYSGUN, false },
+	{ ACT_RANGE_ATTACK1, ACT_RANGE_ATTACK_SLAM, false },
+};
+
+IMPLEMENT_ACTTABLE(CWeaponAnnabelle);
+
+
+
+void CWeaponAnnabelle::Precache(void)
+{
+	CBaseCombatWeapon::Precache();
+	PrecacheScriptSound("Weapon_Annabelle.Draw");
+}
+
+
+/*void CWeaponAnnabelle::ItemPostFrame(void)
+{
+	BaseClass::ItemPostFrame();
+
+	CBasePlayer *pPlayer = ToBasePlayer(GetOwner());
+
+	if (pPlayer == NULL)
+		return;
+}*/
+void CWeaponAnnabelle::PrimaryAttack(void)
+{
+	// Only the player fires this way so we can cast
+	CBasePlayer *pPlayer = ToBasePlayer(GetOwner());
+
+	if (!pPlayer)
+	{
+		return;
+	}
+
+	if (IsNearWall() || GetOwnerIsRunning())
+	{
+		return;
+	}
+
+	/*CBasePlayer *pOwner = ToBasePlayer(GetOwner());
+	if (pOwner)
+	{
+		//if ((m_nShotsFired == 2) || (m_nShotsFired == 4) || (m_nShotsFired == 6) || (m_nShotsFired == 8))
+		{
+			DispatchParticleEffect("weapon_muzzle_smoke2", PATTACH_POINT_FOLLOW, pOwner->GetViewModel(), "muzzle", false);
+		}
+	}*/
+
+	BaseClass::PrimaryAttack();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+// Input  :
+// Output :
+//-----------------------------------------------------------------------------
+void CWeaponAnnabelle::Operator_HandleAnimEvent(animevent_t *pEvent, CBaseCombatCharacter *pOperator)
+{
+	switch (pEvent->event)
+	{
+	case EVENT_WEAPON_SHOTGUN_FIRE:
+	{
+		Vector vecShootOrigin, vecShootDir;
+		vecShootOrigin = pOperator->Weapon_ShootPosition();
+		CAI_BaseNPC *npc = pOperator->MyNPCPointer();
+		ASSERT(npc != NULL);
+		WeaponSound(SINGLE_NPC);
+		pOperator->DoMuzzleFlash();
+		m_iClip1 = m_iClip1 - 1;
+
+		vecShootDir = npc->GetActualShootTrajectory(vecShootOrigin);
+		pOperator->FireBullets(1, vecShootOrigin, vecShootDir, pOperator->GetAttackSpread(this), MAX_TRACE_LENGTH, m_iPrimaryAmmoType, 0);
+	}
+	break;
+
+	default:
+		CBaseCombatWeapon::Operator_HandleAnimEvent(pEvent, pOperator);
+		break;
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Override so only reload one shell at a time
+// Input  :
+// Output :
+//-----------------------------------------------------------------------------
+/*bool CWeaponAnnabelle::StartReload(void)
+{
+	CBaseCombatCharacter *pOwner = GetOwner();
+
+	if (pOwner == NULL)
+		return false;
+
+	if (pOwner->GetAmmoCount(m_iPrimaryAmmoType) <= 0)
+		return false;
+
+	if (m_iClip1 >= GetMaxClip1())
+		return false;
+
+	// If shotgun totally emptied then a pump animation is needed
+	if (m_iClip1 <= 0)
+	{
+		m_bNeedPump = true;
+	}
+
+	int j = min(1, pOwner->GetAmmoCount(m_iPrimaryAmmoType));
+
+	if (j <= 0)
+		return false;
+
+	SendWeaponAnim(ACT_SHOTGUN_RELOAD_START);
+
+	// Make shotgun shell visible
+	SetBodygroup(1, 0);
+
+	pOwner->m_flNextAttack = gpGlobals->curtime;
+	m_flNextPrimaryAttack = gpGlobals->curtime + SequenceDuration();
+	m_bInReload = true;
+	return true;
+}*/
+
+//-----------------------------------------------------------------------------
+// Purpose: Override so only reload one shell at a time
+// Input  :
+// Output :
+//-----------------------------------------------------------------------------
+/*bool CWeaponAnnabelle::Reload(void)
+{
+
+	CBasePlayer *pPlayer = ToBasePlayer(GetOwner());
+	if (!pPlayer)
+		return false;
+
+	m_bInReload = true;
+
+	CBaseCombatCharacter *pOwner = GetOwner();
+
+	if (pOwner == NULL)
+		return false;
+
+	if (pOwner->GetAmmoCount(m_iPrimaryAmmoType) <= 0)
+	{
+		return false;
+	}
+
+	if (m_iClip1 >= GetMaxClip1())
+	{
+		return false;
+	}*/
+
+	/*if (m_iClip1 == 0)
+	{
+		if ((gpGlobals->curtime) > sk_auto_reload_time.GetFloat())
+		{
+			CEffectData data;
+			// Emit six spent shells
+			for (int i = 0; i < 2; i++)
+			{
+				data.m_vOrigin = pOwner->WorldSpaceCenter() + RandomVector(-4, 4);
+				data.m_vAngles = QAngle(90, random->RandomInt(0, 360), 0);
+				data.m_nEntIndex = entindex();
+
+				DispatchEffect("ShellEject", data);
+			}
+		}
+		SendWeaponAnim(ACT_VM_RELOAD_EMPTY);
+	}
+	if (m_iClip1 > 0)*/
+	//{
+		/*if ((gpGlobals->curtime) > sk_auto_reload_time.GetFloat())
+		{
+			CEffectData data;
+			// Emit six spent shells
+			for (int i = 0; i < 1; i++)
+			{
+				data.m_vOrigin = pOwner->WorldSpaceCenter() + RandomVector(-4, 4);
+				data.m_vAngles = QAngle(90, random->RandomInt(0, 360), 0);
+				data.m_nEntIndex = entindex();
+
+				DispatchEffect("ShellEject", data);
+			}
+		}*/
+		/*SendWeaponAnim(ACT_VM_RELOAD);
+	}
+
+	int j = min(1, pOwner->GetAmmoCount(m_iPrimaryAmmoType));
+
+	if (j <= 0)
+		return false;
+
+	FillClip();
+	// Play reload on different channel as otherwise steals channel away from fire sound
+	//WeaponSound(RELOAD);
+	//	SendWeaponAnim( ACT_VM_RELOAD );
+
+	pOwner->m_flNextAttack = gpGlobals->curtime;
+	m_flNextPrimaryAttack = gpGlobals->curtime + SequenceDuration();
+
+	return true;
+}*/
+
+//-----------------------------------------------------------------------------
+// Purpose: Play finish reload anim and fill clip
+// Input  :
+// Output :
+//-----------------------------------------------------------------------------
+/*void CWeaponAnnabelle::FinishReload(void)
+{
+	// Make shotgun shell invisible
+	SetBodygroup(1, 1);
+
+	CBaseCombatCharacter *pOwner = GetOwner();
+
+	if (pOwner == NULL)
+		return;
+
+	m_bInReload = false;
+
+	// Finish reload animation
+	SendWeaponAnim(ACT_SHOTGUN_RELOAD_FINISH);
+
+	pOwner->m_flNextAttack = gpGlobals->curtime;
+	m_flNextPrimaryAttack = gpGlobals->curtime + SequenceDuration();
+
+
+}*/
+
+//-----------------------------------------------------------------------------
+// Purpose: Play finish reload anim and fill clip
+// Input  :
+// Output :
+//-----------------------------------------------------------------------------
+/*void CWeaponAnnabelle::FillClip(void)
+{
+	CBaseCombatCharacter *pOwner = GetOwner();
+
+	if (pOwner == NULL)
+		return;
+
+	// Add them to the clip
+	if (pOwner->GetAmmoCount(m_iPrimaryAmmoType) > 0)
+	{
+		/*if (Clip1() <= 0)// GetMaxClip1() )
+		{
+			m_iClip1 = m_iClip1 + 1;
+			pOwner->RemoveAmmo(2, m_iPrimaryAmmoType);
+		}
+		if ( (Clip1() < 2) && (Clip1() > 0) )*/
+		/*{
+			m_iClip1++;
+			pOwner->RemoveAmmo(1, m_iPrimaryAmmoType);
+		}
+	}
+}*/
+
+//-----------------------------------------------------------------------------
+// Purpose: Play weapon pump anim
+// Input  :
+// Output :
+//-----------------------------------------------------------------------------
+void CWeaponAnnabelle::Pump(void)
+{
+	CBaseCombatCharacter *pOwner = GetOwner();
+
+	if (pOwner == NULL)
+		return;
+
+	m_bNeedPump = false;
+
+	WeaponSound(SPECIAL1);
+
+	// Finish reload animation
+	SendWeaponAnim(ACT_SHOTGUN_PUMP);
+
+	pOwner->m_flNextAttack = gpGlobals->curtime + SequenceDuration();
+	m_flNextPrimaryAttack = gpGlobals->curtime + SequenceDuration();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: 
+//
+//
+//-----------------------------------------------------------------------------
+/*void CWeaponAnnabelle::DryFire(void)
+{
+	WeaponSound(EMPTY);
+	SendWeaponAnim(ACT_VM_DRYFIRE);
+
+	m_flNextPrimaryAttack = gpGlobals->curtime + SequenceDuration();
+}*/
+
+//-----------------------------------------------------------------------------
+// Purpose: 
+//-----------------------------------------------------------------------------
+void CWeaponAnnabelle::ItemHolsterFrame(void)
+{
+	// Must be player held
+	if (GetOwner() && GetOwner()->IsPlayer() == false)
+		return;
+
+	// We can't be active
+	if (GetOwner()->GetActiveWeapon() == this)
+		return;
+
+	// If it's been longer than three seconds, reload
+	if ((gpGlobals->curtime - m_flHolsterTime) > sk_auto_reload_time.GetFloat())
+	{
+		// Reset the timer
+		m_flHolsterTime = gpGlobals->curtime;
+
+		if (GetOwner() == NULL)
+			return;
+
+		if (m_iClip1 == GetMaxClip1())
+			return;
+
+		// Just load the clip with no animations
+		int ammoFill = min((GetMaxClip1() - m_iClip1), GetOwner()->GetAmmoCount(GetPrimaryAmmoType()));
+
+		GetOwner()->RemoveAmmo(ammoFill, GetPrimaryAmmoType());
+		m_iClip1 += ammoFill;
+	}
+}
+
+
+
+bool CWeaponAnnabelle::Holster(CBaseCombatWeapon *pSwitchingTo)
+{
+	return BaseClass::Holster(pSwitchingTo);
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Constructor
+//-----------------------------------------------------------------------------
+CWeaponAnnabelle::CWeaponAnnabelle(void)
+{
+	m_bReloadsSingly = true;
+
+	m_bNeedPump = false;
+	m_bDelayedFire1 = false;
+	m_bDelayedFire2 = false;
+
+	m_fMinRange1 = 0.0;
+	m_fMaxRange1 = 500;
+	m_fMinRange2 = 0.0;
+	m_fMaxRange2 = 200;
+}
