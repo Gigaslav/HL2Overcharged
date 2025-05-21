@@ -1,7 +1,7 @@
 Half - Life 2: Overcharged
 
-Links to source code(also includes some shaders'source code inside), build and content:
-This content is about 95% draft.
+Links to source code(also includes some shaders source code inside), build and content:
+This content is about 5% draft since 1.5 release.
 
 https://mega.nz/fm/2xhXXSxL
 or
