@@ -1,0 +1,450 @@
+//========= Copyright Valve Corporation, All rights reserved. ============//
+//
+// Purpose: 
+//
+//===========================================================================//
+
+#include "cbase.h"
+#include "c_nv_light.h"
+#include "dlight.h"
+#include "iefx.h"
+#include "iviewrender.h"
+#include "view.h"
+#include "engine/ivdebugoverlay.h"
+#include "tier0/vprof.h"
+#include "tier1/KeyValues.h"
+#include "toolframework_client.h"
+
+#ifdef HL2_CLIENT_DLL
+#include "c_basehlplayer.h"
+#endif // HL2_CLIENT_DLL
+
+#if defined( _X360 )
+extern ConVar r_flashlightdepthres;
+#else
+extern ConVar r_flashlightdepthres;
+#endif
+
+// memdbgon must be the last include file in a .cpp file!!!
+#include "tier0/memdbgon.h"
+
+extern ConVar r_flashlightdepthtexture;
+
+void r_newnightvisionCallback_f(IConVar *pConVar, const char *pOldString, float flOldValue);
+static ConVar r_nightvisionShadows("r_nightvisionShadows", "0", FCVAR_ARCHIVE);
+static ConVar r_newnightvision("r_newnightvision", "0", FCVAR_ARCHIVE, "", r_newnightvisionCallback_f);
+static ConVar r_swingnightvision("r_swingnightvision", "1", FCVAR_CHEAT);
+static ConVar r_nightvisionlockposition("r_nightvisionlockposition", "0", FCVAR_CHEAT);
+static ConVar r_nightvisionfov("r_nightvisionfov", "200.0", FCVAR_ARCHIVE);
+static ConVar r_nightvisionoffsetx("r_nightvisionoffsetx", "10.0", FCVAR_CHEAT);
+static ConVar r_nightvisionoffsety("r_nightvisionoffsety", "-20.0", FCVAR_CHEAT);
+static ConVar r_nightvisionoffsetz("r_nightvisionoffsetz", "24.0", FCVAR_CHEAT);
+static ConVar r_nightvisionnear("r_nightvisionnear", "4.0", FCVAR_CHEAT);
+static ConVar r_nightvisionfar("r_nightvisionfar", "50.0", FCVAR_CHEAT);
+static ConVar r_nightvisionconstant("r_nightvisionconstant", "0.0", FCVAR_CHEAT);
+static ConVar r_nightvisionlinear("r_nightvisionlinear", "0.5", FCVAR_CHEAT);
+static ConVar r_nightvisionquadratic("r_nightvisionquadratic", "0.0", FCVAR_CHEAT);
+static ConVar r_nightvisionvisualizetrace("r_nightvisionvisualizetrace", "0", FCVAR_CHEAT);
+static ConVar r_nightvisionambient("r_nightvisionambient", "0.0", FCVAR_CHEAT);
+static ConVar r_nightvisionshadowatten("r_nightvisionshadowatten", "0.35", FCVAR_CHEAT);
+static ConVar r_nightvisionladderdist("r_nightvisionladderdist", "40.0", FCVAR_CHEAT);
+#ifndef MAPBASE
+static ConVar mat_slopescaledepthbias_shadowmap("mat_slopescaledepthbias_shadowmap", "16", FCVAR_CHEAT);
+static ConVar mat_depthbias_shadowmap("mat_depthbias_shadowmap", "0.0005", FCVAR_CHEAT);
+#else
+static ConVar mat_nightvision_slopescaledepthbias_shadowmap("mat_nightvision_slopescaledepthbias_shadowmap", "4", FCVAR_CHEAT);
+static ConVar mat_nightvision_depthbias_shadowmap("mat_nightvision_depthbias_shadowmap", "0.00001", FCVAR_CHEAT);
+#endif
+/*#ifdef MAPBASE
+static ConVar r_nightvisiontextureoverride( "r_nightvisiontextureoverride", "effects/flashlight_border", FCVAR_ARCHIVE );
+#endif*/
+static ConVar r_nightvisiontextureoverride("r_nightvisiontextureoverride", "effects/flashlight_border", FCVAR_NONE);
+
+
+void r_newnightvisionCallback_f(IConVar *pConVar, const char *pOldString, float flOldValue)
+{
+	if (engine->GetDXSupportLevel() < 70)
+	{
+		r_newnightvision.SetValue(0);
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: 
+// Input  : nEntIndex - The m_nEntIndex of the client entity that is creating us.
+//			vecPos - The position of the light emitter.
+//			vecDir - The direction of the light emission.
+//-----------------------------------------------------------------------------
+C_NVLight::C_NVLight(int nEntIndex)
+{
+	m_FlashlightHandle = CLIENTSHADOW_INVALID_HANDLE;
+	m_nEntIndex = nEntIndex;
+
+	m_bIsOn = false;
+	m_pPointLight = NULL;
+	//if (engine->GetDXSupportLevel() < 70)
+	{
+		r_newnightvision.SetValue(1);
+	}
+
+#ifdef MAPBASE
+	if (r_nightvisiontextureoverride.GetString()[0] != '\0')
+	{
+		m_FlashlightTexture.Init(r_nightvisiontextureoverride.GetString(), TEXTURE_GROUP_OTHER, true);
+	}
+	else
+#endif
+		//if ( g_pMaterialSystemHardwareConfig->SupportsBorderColor() )
+	{
+		m_FlashlightTexture.Init("effects/flashlight_border", TEXTURE_GROUP_OTHER, true);
+	}
+	/*else
+	{
+	m_FlashlightTexture.Init( "effects/flashlight001", TEXTURE_GROUP_OTHER, true );
+	}*/
+}
+
+
+//-----------------------------------------------------------------------------
+// Purpose: 
+//-----------------------------------------------------------------------------
+C_NVLight::~C_NVLight()
+{
+	LightOff();
+}
+
+
+//-----------------------------------------------------------------------------
+// Purpose: 
+//-----------------------------------------------------------------------------
+void C_NVLight::TurnOn()
+{
+	m_bIsOn = true;
+	m_flDistMod = 1.0f;
+}
+
+
+//-----------------------------------------------------------------------------
+// Purpose: 
+//-----------------------------------------------------------------------------
+void C_NVLight::TurnOff()
+{
+	if (m_bIsOn)
+	{
+		m_bIsOn = false;
+		LightOff();
+	}
+}
+
+// Custom trace filter that skips the player and the view model.
+// If we don't do this, we'll end up having the light right in front of us all
+// the time.
+class CTraceFilterSkipPlayerAndViewModel : public CTraceFilter
+{
+public:
+	virtual bool ShouldHitEntity(IHandleEntity *pServerEntity, int contentsMask)
+	{
+		// Test against the vehicle too?
+		// FLASHLIGHTFIXME: how do you know that you are actually inside of the vehicle?
+		C_BaseEntity *pEntity = EntityFromEntityHandle(pServerEntity);
+		if (!pEntity)
+			return true;
+
+		if ((dynamic_cast<C_BaseViewModel *>(pEntity) != NULL) ||
+			(dynamic_cast<C_BasePlayer *>(pEntity) != NULL) ||
+			pEntity->GetCollisionGroup() == COLLISION_GROUP_DEBRIS ||
+			pEntity->GetCollisionGroup() == COLLISION_GROUP_INTERACTIVE_DEBRIS)
+		{
+			return false;
+		}
+
+		return true;
+	}
+};
+
+//-----------------------------------------------------------------------------
+// Purpose: Do the headlight
+//-----------------------------------------------------------------------------
+void C_NVLight::UpdateLightNew(const Vector &vecPos, const Vector &vecForward, const Vector &vecRight, const Vector &vecUp)
+{
+	VPROF_BUDGET("C_NVLight::UpdateLightNew", VPROF_BUDGETGROUP_SHADOW_DEPTH_TEXTURING);
+
+	FlashlightState_t state;
+
+	// We will lock some of the flashlight params if player is on a ladder, to prevent oscillations due to the trace-rays
+	bool bPlayerOnLadder = (C_BasePlayer::GetLocalPlayer()->GetMoveType() == MOVETYPE_LADDER);
+
+	const float flEpsilon = 0.1f;			// Offset flashlight position along vecUp
+	const float flDistCutoff = 128.0f;
+	const float flDistDrag = 0.2;
+
+	CTraceFilterSkipPlayerAndViewModel traceFilter;
+	float flOffsetY = r_nightvisionoffsety.GetFloat();
+
+	if (r_swingnightvision.GetBool())
+	{
+		// This projects the view direction backwards, attempting to raise the vertical
+		// offset of the flashlight, but only when the player is looking down.
+		Vector vecSwingLight = vecPos + vecForward * -12.0f;
+		if (vecSwingLight.z > vecPos.z)
+		{
+			flOffsetY += (vecSwingLight.z - vecPos.z);
+		}
+	}
+
+	Vector vOrigin = vecPos + flOffsetY * vecUp;
+
+	// Not on ladder...trace a hull
+	if (!bPlayerOnLadder)
+	{
+		trace_t pmOriginTrace;
+		UTIL_TraceHull(vecPos, vOrigin, Vector(-4, -4, -4), Vector(4, 4, 4), MASK_SOLID & ~(CONTENTS_HITBOX), &traceFilter, &pmOriginTrace);
+
+		if (pmOriginTrace.DidHit())
+		{
+			vOrigin = vecPos;
+		}
+	}
+	else // on ladder...skip the above hull trace
+	{
+		vOrigin = vecPos;
+	}
+
+	// Now do a trace along the flashlight direction to ensure there is nothing within range to pull back from
+	int iMask = MASK_OPAQUE_AND_NPCS;
+	iMask &= ~CONTENTS_HITBOX;
+	iMask |= CONTENTS_WINDOW;
+
+	Vector vTarget = vecPos + vecForward * r_nightvisionfar.GetFloat();
+
+	// Work with these local copies of the basis for the rest of the function
+	Vector vDir = vTarget - vOrigin;
+	Vector vRight = vecRight;
+	Vector vUp = vecUp;
+	VectorNormalize(vDir);
+	VectorNormalize(vRight);
+	VectorNormalize(vUp);
+
+	// Orthonormalize the basis, since the flashlight texture projection will require this later...
+	vUp -= DotProduct(vDir, vUp) * vDir;
+	VectorNormalize(vUp);
+	vRight -= DotProduct(vDir, vRight) * vDir;
+	VectorNormalize(vRight);
+	vRight -= DotProduct(vUp, vRight) * vUp;
+	VectorNormalize(vRight);
+
+	AssertFloatEquals(DotProduct(vDir, vRight), 0.0f, 1e-3);
+	AssertFloatEquals(DotProduct(vDir, vUp), 0.0f, 1e-3);
+	AssertFloatEquals(DotProduct(vRight, vUp), 0.0f, 1e-3);
+
+	trace_t pmDirectionTrace;
+	UTIL_TraceHull(vOrigin, vTarget, Vector(-4, -4, -4), Vector(4, 4, 4), iMask, &traceFilter, &pmDirectionTrace);
+
+	if (r_nightvisionvisualizetrace.GetBool() == true)
+	{
+		debugoverlay->AddBoxOverlay(pmDirectionTrace.endpos, Vector(-4, -4, -4), Vector(4, 4, 4), QAngle(0, 0, 0), 0, 0, 255, 16, 0);
+		debugoverlay->AddLineOverlay(vOrigin, pmDirectionTrace.endpos, 255, 0, 0, false, 0);
+	}
+
+	float flDist = (pmDirectionTrace.endpos - vOrigin).Length();
+	if (flDist < flDistCutoff)
+	{
+		// We have an intersection with our cutoff range
+		// Determine how far to pull back, then trace to see if we are clear
+		float flPullBackDist = bPlayerOnLadder ? r_nightvisionladderdist.GetFloat() : flDistCutoff - flDist;	// Fixed pull-back distance if on ladder
+		m_flDistMod = Lerp(flDistDrag, m_flDistMod, flPullBackDist);
+
+		if (!bPlayerOnLadder)
+		{
+			trace_t pmBackTrace;
+			UTIL_TraceHull(vOrigin, vOrigin - vDir*(flPullBackDist - flEpsilon), Vector(-4, -4, -4), Vector(4, 4, 4), iMask, &traceFilter, &pmBackTrace);
+			if (pmBackTrace.DidHit())
+			{
+				// We have an intersection behind us as well, so limit our m_flDistMod
+				float flMaxDist = (pmBackTrace.endpos - vOrigin).Length() - flEpsilon;
+				if (m_flDistMod > flMaxDist)
+					m_flDistMod = flMaxDist;
+			}
+		}
+	}
+	else
+	{
+		m_flDistMod = Lerp(flDistDrag, m_flDistMod, 0.0f);
+	}
+	vOrigin = vOrigin - vDir * m_flDistMod;
+
+	state.m_vecLightOrigin = vOrigin;
+
+	BasisToQuaternion(vDir, vRight, vUp, state.m_quatOrientation);
+
+	state.m_fQuadraticAtten = r_nightvisionquadratic.GetFloat();
+	state.m_fHorizontalFOVDegrees = r_nightvisionfov.GetFloat() - (16.0f * (1.0f));
+	state.m_fVerticalFOVDegrees = r_nightvisionfov.GetFloat() - (16.0f * (1.0f));
+	state.m_fLinearAtten = r_nightvisionlinear.GetFloat();
+	state.m_fHorizontalFOVDegrees = r_nightvisionfov.GetFloat();
+	state.m_fVerticalFOVDegrees = r_nightvisionfov.GetFloat();
+	state.m_fConstantAtten = r_nightvisionconstant.GetFloat();
+	state.m_Color[0] = 1.0f;
+	state.m_Color[1] = 1.0f;
+	state.m_Color[2] = 1.0f;
+	state.m_Color[3] = r_nightvisionambient.GetFloat();
+	state.m_NearZ = r_nightvisionnear.GetFloat() + m_flDistMod;	// Push near plane out so that we don't clip the world when the flashlight pulls back 
+	state.m_FarZ = r_nightvisionfar.GetFloat();
+	state.m_bEnableShadows = false;//r_flashlightdepthtexture.GetBool();
+	state.m_flShadowMapResolution = r_flashlightdepthres.GetInt();
+
+	state.m_pSpotlightTexture = m_FlashlightTexture;
+	state.m_nSpotlightTextureFrame = 0;
+
+	state.m_flShadowAtten = r_nightvisionshadowatten.GetFloat();
+	state.m_flShadowSlopeScaleDepthBias = mat_nightvision_slopescaledepthbias_shadowmap.GetFloat();
+	state.m_flShadowDepthBias = mat_nightvision_depthbias_shadowmap.GetFloat();
+
+	if (m_FlashlightHandle == CLIENTSHADOW_INVALID_HANDLE)
+	{
+		m_FlashlightHandle = g_pClientShadowMgr->CreateFlashlight(state);
+	}
+	else
+	{
+		if (!r_nightvisionlockposition.GetBool())
+		{
+			g_pClientShadowMgr->UpdateFlashlightState(m_FlashlightHandle, state);
+		}
+	}
+
+	g_pClientShadowMgr->UpdateProjectedTexture(m_FlashlightHandle, true);
+
+	// Kill the old flashlight method if we have one.
+	LightOffOld();
+
+#ifndef NO_TOOLFRAMEWORK
+	if (clienttools->IsInRecordingMode())
+	{
+		KeyValues *msg = new KeyValues("FlashlightState");
+		msg->SetFloat("time", gpGlobals->curtime);
+		msg->SetInt("entindex", m_nEntIndex);
+		msg->SetInt("flashlightHandle", m_FlashlightHandle);
+		msg->SetPtr("flashlightState", &state);
+		ToolFramework_PostToolMessage(HTOOLHANDLE_INVALID, msg);
+		msg->deleteThis();
+	}
+#endif
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Do the headlight
+//-----------------------------------------------------------------------------
+void C_NVLight::UpdateLightOld(const Vector &vecPos, const Vector &vecDir, int nDistance)
+{
+	if (!m_pPointLight || (m_pPointLight->key != m_nEntIndex))
+	{
+		// Set up the environment light
+		m_pPointLight = effects->CL_AllocDlight(m_nEntIndex);
+		m_pPointLight->flags = 0.0f;
+		m_pPointLight->radius = 80;
+	}
+
+	// For bumped lighting
+	VectorCopy(vecDir, m_pPointLight->m_Direction);
+
+	float dist = r_nightvisionfar.GetFloat();
+
+	Vector end;
+	end = vecPos + /*nDistance*/dist * vecDir;
+
+	// Trace a line outward, skipping the player model and the view model.
+	trace_t pm;
+	CTraceFilterSkipPlayerAndViewModel traceFilter;
+	UTIL_TraceLine(vecPos, end, MASK_ALL, &traceFilter, &pm);
+	VectorCopy(pm.endpos, m_pPointLight->origin);
+
+	float falloff = r_nightvisionlinear.GetFloat();//pm.fraction * /*nDistance*/dist;
+
+	/*if (falloff < 500)
+		falloff = 1.0;
+	else
+		falloff = 500.0 / falloff;
+
+	falloff *= falloff;*/
+
+	m_pPointLight->radius = r_nightvisionfov.GetFloat()*3;
+	m_pPointLight->color.r = m_pPointLight->color.g = m_pPointLight->color.b = 255 * falloff;
+	m_pPointLight->color.exponent = 0;
+
+	// Make it live for a bit
+	m_pPointLight->die = gpGlobals->curtime + 0.2f;
+
+	// Update list of surfaces we influence
+	render->TouchLight(m_pPointLight);
+
+	// kill the new flashlight if we have one
+	LightOffNew();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Do the headlight
+//-----------------------------------------------------------------------------
+void C_NVLight::UpdateLight(const Vector &vecPos, const Vector &vecDir, const Vector &vecRight, const Vector &vecUp, int nDistance)
+{
+	if (!m_bIsOn)
+	{
+		return;
+	}
+	if (false)//(r_newnightvision.GetBool())
+	{
+		UpdateLightNew(vecPos, vecDir, vecRight, vecUp);
+	}
+	else
+	{
+		UpdateLightOld(vecPos, vecDir, nDistance);
+	}
+}
+
+
+//-----------------------------------------------------------------------------
+// Purpose: 
+//-----------------------------------------------------------------------------
+void C_NVLight::LightOffNew()
+{
+#ifndef NO_TOOLFRAMEWORK
+	if (clienttools->IsInRecordingMode())
+	{
+		KeyValues *msg = new KeyValues("FlashlightState");
+		msg->SetFloat("time", gpGlobals->curtime);
+		msg->SetInt("entindex", m_nEntIndex);
+		msg->SetInt("flashlightHandle", m_FlashlightHandle);
+		msg->SetPtr("flashlightState", NULL);
+		ToolFramework_PostToolMessage(HTOOLHANDLE_INVALID, msg);
+		msg->deleteThis();
+	}
+#endif
+
+	// Clear out the light
+	if (m_FlashlightHandle != CLIENTSHADOW_INVALID_HANDLE)
+	{
+		g_pClientShadowMgr->DestroyFlashlight(m_FlashlightHandle);
+		m_FlashlightHandle = CLIENTSHADOW_INVALID_HANDLE;
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: 
+//-----------------------------------------------------------------------------
+void C_NVLight::LightOffOld()
+{
+	if (m_pPointLight && (m_pPointLight->key == m_nEntIndex))
+	{
+		m_pPointLight->die = gpGlobals->curtime;
+		m_pPointLight = NULL;
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: 
+//-----------------------------------------------------------------------------
+void C_NVLight::LightOff()
+{
+	LightOffOld();
+	LightOffNew();
+}
+
